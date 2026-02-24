@@ -109,6 +109,23 @@ class GamesService {
     return 'active'
   }
 
+  getLegalMovesByFrom(chess) {
+    const byFrom = {}
+    const moves = chess.moves({ verbose: true })
+
+    for (const move of moves) {
+      if (!byFrom[move.from]) {
+        byFrom[move.from] = []
+      }
+
+      if (!byFrom[move.from].includes(move.to)) {
+        byFrom[move.from].push(move.to)
+      }
+    }
+
+    return byFrom
+  }
+
   evaluatePosition(chess) {
     if (chess.isCheckmate()) {
       return chess.turn() === 'w' ? -100000 : 100000
@@ -277,6 +294,8 @@ class GamesService {
     const history = game.chess.history()
     const status = this.getStatus(game.chess)
     const engineColor = this.getEngineColor(game)
+    const verboseHistory = game.chess.history({ verbose: true })
+    const lastMoveInfo = verboseHistory.length > 0 ? verboseHistory[verboseHistory.length - 1] : null
 
     return {
       id: game.id,
@@ -288,6 +307,7 @@ class GamesService {
       moveCount: history.length,
       status,
       lastMove: history.length > 0 ? history[history.length - 1] : null,
+      lastMoveSquare: lastMoveInfo ? lastMoveInfo.to : null,
       createdAt: game.createdAt,
       updatedAt: game.updatedAt
     }
@@ -296,6 +316,9 @@ class GamesService {
   toResult(game) {
     const history = game.chess.history()
     const engineColor = this.getEngineColor(game)
+    const verboseHistory = game.chess.history({ verbose: true })
+    const lastMoveInfo = verboseHistory.length > 0 ? verboseHistory[verboseHistory.length - 1] : null
+    const legalMovesByFrom = this.getLegalMovesByFrom(game.chess)
 
     return {
       id: game.id,
@@ -314,6 +337,14 @@ class GamesService {
       pgn: game.chess.pgn(),
       history,
       moveCount: history.length,
+      legalMovesByFrom,
+      lastMoveInfo: lastMoveInfo
+        ? {
+            from: lastMoveInfo.from,
+            to: lastMoveInfo.to,
+            promotion: lastMoveInfo.promotion
+          }
+        : null,
       board: game.chess.board(),
       createdAt: game.createdAt,
       updatedAt: game.updatedAt
@@ -546,6 +577,32 @@ class GamesService {
       return result
     }
 
+    if (data.computerMove === true) {
+      if (game.mode !== 'computer') {
+        throw new BadRequest('Computer move is only available in computer mode.')
+      }
+
+      if (game.chess.isGameOver()) {
+        throw new BadRequest('Game is already over.')
+      }
+
+      if (this.isPlayersTurn(game)) {
+        throw new BadRequest('It is the player turn, not the computer turn.')
+      }
+
+      const computerMove = this.applyComputerMove(game)
+      if (!computerMove) {
+        throw new BadRequest('No legal computer move available.')
+      }
+
+      this.saveToDisk()
+
+      const result = this.toResult(game)
+      result.computerMove = computerMove
+
+      return result
+    }
+
     if (data.undo === true) {
       const firstUndone = game.chess.undo()
 
@@ -600,7 +657,13 @@ class GamesService {
     game.updatedAt = new Date().toISOString()
     let computerMove = null
 
-    if (game.mode === 'computer' && !game.chess.isGameOver()) {
+    const shouldAutoComputerMove =
+      game.mode === 'computer' &&
+      !game.chess.isGameOver() &&
+      data.deferComputer !== true &&
+      data.deferComputer !== 'true'
+
+    if (shouldAutoComputerMove) {
       computerMove = this.applyComputerMove(game)
     }
 

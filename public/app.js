@@ -19,10 +19,22 @@ const pieceCodepoints = {
 
 let currentGame = null
 let selectedSquare = ''
+let validTargetSquares = []
 let gamesIndex = []
 let dragSourceSquare = ''
+let lastUpdatedSquare = ''
+let pendingComputerTimeoutId = null
 
 const files = 'abcdefgh'
+
+function normalizeSquare(value) {
+  if (typeof value !== 'string') {
+    return ''
+  }
+
+  const trimmed = value.trim().toLowerCase()
+  return /^[a-h][1-8]$/.test(trimmed) ? trimmed : ''
+}
 
 function colorName(color) {
   return color === 'w' ? 'White' : 'Black'
@@ -40,6 +52,71 @@ function moveLabel(move) {
 
   const promotion = move.promotion ? `=${move.promotion}` : ''
   return `${move.from}-${move.to}${promotion}`
+}
+
+function toSimpleMove(move) {
+  if (!move || typeof move !== 'object') {
+    return null
+  }
+
+  const from = normalizeSquare(move.from)
+  const to = normalizeSquare(move.to)
+
+  if (!from || !to) {
+    return null
+  }
+
+  return {
+    from,
+    to,
+    promotion: typeof move.promotion === 'string' ? move.promotion.toLowerCase() : undefined
+  }
+}
+
+function getAnimationMoveFromResponse(payload, responseData) {
+  const explicitPayloadMove = payload?.move ? toSimpleMove(payload.move) : null
+  const responseLastMove = toSimpleMove(responseData?.lastMove)
+  const responseLastMoveInfo = toSimpleMove(responseData?.lastMoveInfo)
+  const computerMove = toSimpleMove(responseData?.computerMove)
+
+  if (explicitPayloadMove) {
+    return explicitPayloadMove
+  }
+
+  return responseLastMove || computerMove || responseLastMoveInfo
+}
+
+function getHighlightSquareFromResponse(payload, responseData) {
+  const computerMove = toSimpleMove(responseData?.computerMove)
+  if (computerMove) {
+    return computerMove.to
+  }
+
+  const responseLastMove = toSimpleMove(responseData?.lastMove)
+  if (responseLastMove) {
+    return responseLastMove.to
+  }
+
+  const responseLastMoveInfo = toSimpleMove(responseData?.lastMoveInfo)
+  if (responseLastMoveInfo) {
+    return responseLastMoveInfo.to
+  }
+
+  const extraUndo = toSimpleMove(responseData?.additionalUndoneMove)
+  if (extraUndo) {
+    return extraUndo.from
+  }
+
+  const undoMove = toSimpleMove(responseData?.lastUndoneMove)
+  if (undoMove) {
+    return undoMove.from
+  }
+
+  if (payload?.reset === true) {
+    return ''
+  }
+
+  return lastUpdatedSquare
 }
 
 function statusLabel(game) {
@@ -78,6 +155,30 @@ function pieceSymbol(piece) {
 
 function squareName(rowIndex, colIndex) {
   return `${files[colIndex]}${8 - rowIndex}`
+}
+
+function squareToPosition(square) {
+  const normalized = normalizeSquare(square)
+  if (!normalized) {
+    return null
+  }
+
+  const col = files.indexOf(normalized[0])
+  const row = 8 - Number(normalized[1])
+  if (col < 0 || row < 0 || row > 7) {
+    return null
+  }
+
+  return { row, col }
+}
+
+function getPieceAtSquare(square) {
+  const pos = squareToPosition(square)
+  if (!pos || !currentGame || !Array.isArray(currentGame.board)) {
+    return null
+  }
+
+  return currentGame.board[pos.row]?.[pos.col] || null
 }
 
 function formatTimestamp(value) {
@@ -123,10 +224,106 @@ function isDraggablePiece(piece) {
   return true
 }
 
+function getValidTargetsForSquare(square) {
+  const normalized = normalizeSquare(square)
+  if (!normalized || !currentGame || !currentGame.legalMovesByFrom) {
+    return []
+  }
+
+  const targets = currentGame.legalMovesByFrom[normalized]
+  return Array.isArray(targets) ? targets.slice() : []
+}
+
+function clearSelection() {
+  selectedSquare = ''
+  validTargetSquares = []
+}
+
+function selectSquare(square) {
+  selectedSquare = square
+  fromEl.value = square
+  validTargetSquares = getValidTargetsForSquare(square)
+}
+
+function canSelectSquare(square) {
+  const piece = getPieceAtSquare(square)
+  if (!piece || !currentGame) {
+    return false
+  }
+
+  if (piece.color !== currentGame.turn) {
+    return false
+  }
+
+  if (currentGame.mode === 'computer') {
+    return piece.color === currentGame.playerColor
+  }
+
+  return true
+}
+
 function clearDropTargets() {
   boardEl.querySelectorAll('.drop-target').forEach((node) => {
     node.classList.remove('drop-target')
   })
+}
+
+function clearPendingComputerMove() {
+  if (pendingComputerTimeoutId) {
+    clearTimeout(pendingComputerTimeoutId)
+    pendingComputerTimeoutId = null
+  }
+}
+
+function animateRenderedMove(move) {
+  const parsed = toSimpleMove(move)
+  if (!parsed || parsed.from === parsed.to) {
+    return
+  }
+
+  if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+    return
+  }
+
+  const fromSquareEl = boardEl.querySelector(`.square[data-square="${parsed.from}"]`)
+  const toSquareEl = boardEl.querySelector(`.square[data-square="${parsed.to}"]`)
+
+  if (!fromSquareEl || !toSquareEl) {
+    return
+  }
+
+  const pieceEl = toSquareEl.querySelector('.piece')
+  if (!pieceEl) {
+    return
+  }
+
+  const fromRect = fromSquareEl.getBoundingClientRect()
+  const toRect = toSquareEl.getBoundingClientRect()
+  const dx = fromRect.left - toRect.left
+  const dy = fromRect.top - toRect.top
+
+  if (dx === 0 && dy === 0) {
+    return
+  }
+
+  pieceEl.style.transition = 'none'
+  pieceEl.style.transform = `translate(${dx}px, ${dy}px)`
+  pieceEl.style.willChange = 'transform'
+
+  requestAnimationFrame(() => {
+    requestAnimationFrame(() => {
+      pieceEl.style.transition = 'transform 260ms cubic-bezier(0.16, 1, 0.3, 1)'
+      pieceEl.style.transform = 'translate(0, 0)'
+    })
+  })
+
+  const cleanup = () => {
+    pieceEl.style.transition = ''
+    pieceEl.style.transform = ''
+    pieceEl.style.willChange = ''
+  }
+
+  pieceEl.addEventListener('transitionend', cleanup, { once: true })
 }
 
 function updateSetupControlsEnabledState() {
@@ -144,6 +341,49 @@ function syncSetupControlsFromGame(game) {
   difficultySelectEl.value = game.difficulty || 'medium'
   colorSelectEl.value = game.playerColor || 'w'
   updateSetupControlsEnabledState()
+}
+
+function isGameOver(game) {
+  if (!game) {
+    return true
+  }
+
+  return Boolean(game.isCheckmate || game.isDraw || game.status === 'checkmate' || game.status === 'draw')
+}
+
+function scheduleComputerMoveWithDelay() {
+  clearPendingComputerMove()
+
+  if (!currentGame || currentGame.mode !== 'computer' || isPlayerTurn() || isGameOver(currentGame)) {
+    return
+  }
+
+  const scheduledGameId = String(currentGame.id)
+
+  pendingComputerTimeoutId = setTimeout(async () => {
+    pendingComputerTimeoutId = null
+
+    if (!currentGame || String(currentGame.id) !== scheduledGameId) {
+      return
+    }
+
+    if (currentGame.mode !== 'computer' || isPlayerTurn() || isGameOver(currentGame)) {
+      return
+    }
+
+    try {
+      await patchCurrentGame({ computerMove: true })
+
+      const computerMove = toSimpleMove(currentGame.computerMove) || toSimpleMove(currentGame.lastMoveInfo)
+      if (computerMove) {
+        setStatus(`Computer played ${moveLabel(computerMove)}. ${statusLabel(currentGame)}.`)
+      } else {
+        setStatus(`Computer moved. ${statusLabel(currentGame)}.`)
+      }
+    } catch (error) {
+      setStatus(error.message, true)
+    }
+  }, 1000)
 }
 
 async function parseResponse(response) {
@@ -169,10 +409,13 @@ async function fetchGamesIndex() {
 }
 
 async function loadGame(id, quiet = false) {
+  clearPendingComputerMove()
+
   const response = await fetch(`/games/${id}`)
   currentGame = await parseResponse(response)
-  selectedSquare = ''
+  clearSelection()
   dragSourceSquare = ''
+  lastUpdatedSquare = normalizeSquare(currentGame?.lastMoveInfo?.to)
   syncSetupControlsFromGame(currentGame)
   renderGame()
 
@@ -182,6 +425,8 @@ async function loadGame(id, quiet = false) {
 }
 
 async function createGame() {
+  clearPendingComputerMove()
+
   const payload = {
     mode: modeSelectEl.value,
     difficulty: difficultySelectEl.value,
@@ -194,14 +439,18 @@ async function createGame() {
     body: JSON.stringify(payload)
   })
 
-  currentGame = await parseResponse(response)
-  selectedSquare = ''
+  const createdGame = await parseResponse(response)
+  const animationMove = toSimpleMove(createdGame.computerMove)
+
+  currentGame = createdGame
+  clearSelection()
   dragSourceSquare = ''
+  lastUpdatedSquare = createdGame.computerMove ? normalizeSquare(createdGame.computerMove.to) : ''
   fromEl.value = ''
   toEl.value = ''
   promotionEl.value = ''
   syncSetupControlsFromGame(currentGame)
-  renderGame()
+  renderGame(animationMove)
   await fetchGamesIndex()
 
   let message = `Created game ${currentGame.id}. ${statusLabel(currentGame)}.`
@@ -223,11 +472,15 @@ async function patchCurrentGame(payload) {
     body: JSON.stringify(payload)
   })
 
-  currentGame = await parseResponse(response)
-  selectedSquare = ''
+  const updatedGame = await parseResponse(response)
+  const animationMove = getAnimationMoveFromResponse(payload, updatedGame)
+
+  currentGame = updatedGame
+  clearSelection()
   dragSourceSquare = ''
+  lastUpdatedSquare = getHighlightSquareFromResponse(payload, updatedGame)
   syncSetupControlsFromGame(currentGame)
-  renderGame()
+  renderGame(animationMove)
   await fetchGamesIndex()
 }
 
@@ -236,8 +489,10 @@ async function submitMove(fromOverride, toOverride) {
     throw new Error('It is not your turn.')
   }
 
-  const from = (fromOverride || fromEl.value).trim().toLowerCase()
-  const to = (toOverride || toEl.value).trim().toLowerCase()
+  clearPendingComputerMove()
+
+  const from = normalizeSquare(fromOverride || fromEl.value)
+  const to = normalizeSquare(toOverride || toEl.value)
   const promotion = promotionEl.value.trim().toLowerCase()
 
   if (!from || !to) {
@@ -249,14 +504,24 @@ async function submitMove(fromOverride, toOverride) {
     payload.move.promotion = promotion
   }
 
+  if (currentGame.mode === 'computer') {
+    payload.deferComputer = true
+  }
+
   await patchCurrentGame(payload)
   toEl.value = ''
 
-  const computerReply = currentGame.computerMove ? ` Computer replied ${moveLabel(currentGame.computerMove)}.` : ''
-  setStatus(`Move played. ${statusLabel(currentGame)}.${computerReply}`)
+  if (currentGame.mode === 'computer' && !isPlayerTurn() && !isGameOver(currentGame)) {
+    setStatus(`Move played. Computer thinking...`)
+    scheduleComputerMoveWithDelay()
+    return
+  }
+
+  setStatus(`Move played. ${statusLabel(currentGame)}.`)
 }
 
 async function undoMove() {
+  clearPendingComputerMove()
   await patchCurrentGame({ undo: true })
 
   let message = `Move undone. ${statusLabel(currentGame)}.`
@@ -268,6 +533,7 @@ async function undoMove() {
 }
 
 async function resetGame() {
+  clearPendingComputerMove()
   await patchCurrentGame({ reset: true })
   fromEl.value = ''
   toEl.value = ''
@@ -281,20 +547,58 @@ async function resetGame() {
   setStatus(message)
 }
 
-function handleSquareClick(square) {
+async function handleSquareClick(square) {
   if (!currentGame || !isPlayerTurn()) {
     return
   }
 
-  if (!selectedSquare) {
-    selectedSquare = square
-    fromEl.value = square
-  } else {
-    toEl.value = square
-    selectedSquare = ''
+  const normalized = normalizeSquare(square)
+  if (!normalized) {
+    return
   }
 
+  if (!selectedSquare) {
+    if (!canSelectSquare(normalized)) {
+      return
+    }
+
+    selectSquare(normalized)
+    renderBoard()
+    return
+  }
+
+  if (normalized === selectedSquare) {
+    clearSelection()
+    renderBoard()
+    return
+  }
+
+  if (canSelectSquare(normalized)) {
+    selectSquare(normalized)
+    renderBoard()
+    return
+  }
+
+  if (!validTargetSquares.includes(normalized)) {
+    clearSelection()
+    renderBoard()
+    return
+  }
+
+  const from = selectedSquare
+  clearSelection()
   renderBoard()
+  fromEl.value = from
+  toEl.value = normalized
+
+  try {
+    await submitMove(from, normalized)
+  } catch (error) {
+    setStatus(error.message, true)
+    if (currentGame) {
+      await loadGame(currentGame.id, true)
+    }
+  }
 }
 
 async function handleDrop(targetSquare) {
@@ -303,6 +607,11 @@ async function handleDrop(targetSquare) {
   dragSourceSquare = ''
 
   if (!sourceSquare || sourceSquare === targetSquare) {
+    return
+  }
+
+  const targets = getValidTargetsForSquare(sourceSquare)
+  if (!targets.includes(targetSquare)) {
     return
   }
 
@@ -319,7 +628,7 @@ async function handleDrop(targetSquare) {
   }
 }
 
-function renderBoard() {
+function renderBoard(animationMove = null) {
   boardEl.innerHTML = ''
 
   if (!currentGame) {
@@ -336,14 +645,28 @@ function renderBoard() {
 
       const button = document.createElement('button')
       button.type = 'button'
+      button.dataset.square = square
       button.className = `square ${isLight ? 'light' : 'dark'}`
       if (square === selectedSquare) {
         button.classList.add('selected')
       }
+      if (square === lastUpdatedSquare) {
+        button.classList.add('last-updated')
+      }
+      if (validTargetSquares.includes(square)) {
+        button.classList.add('valid-target')
+      }
 
-      button.addEventListener('click', () => handleSquareClick(square))
+      button.addEventListener('click', async () => {
+        await handleSquareClick(square)
+      })
       button.addEventListener('dragover', (event) => {
         if (!dragSourceSquare || !isPlayerTurn()) {
+          return
+        }
+
+        const targets = getValidTargetsForSquare(dragSourceSquare)
+        if (!targets.includes(square)) {
           return
         }
 
@@ -396,6 +719,10 @@ function renderBoard() {
       boardEl.appendChild(button)
     }
   }
+
+  if (animationMove) {
+    animateRenderedMove(animationMove)
+  }
 }
 
 function renderHistory() {
@@ -419,10 +746,10 @@ function renderTurnChip() {
   turnChipEl.textContent = statusLabel(currentGame)
 }
 
-function renderGame() {
+function renderGame(animationMove = null) {
   gameIdEl.textContent = currentGame ? currentGame.id : 'none'
   renderTurnChip()
-  renderBoard()
+  renderBoard(animationMove)
   renderHistory()
   renderGamesList()
 }

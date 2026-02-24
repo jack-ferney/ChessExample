@@ -16,6 +16,8 @@ A modern chess web app built with Feathers v5 and a REST API.
 - Legal move validation via `chess.js`
 - Computer opponent with 3 difficulties (`easy`, `medium`, `hard`)
 - Drag-and-drop piece movement (with click-based fallback)
+- Click a piece to preview legal destination squares, then click a target square to move
+- Computer moves are delayed by ~1 second and animated
 - Undo support and older-game review from the UI
 
 ## Run
@@ -55,6 +57,22 @@ Play a move:
 curl -X PATCH http://localhost:3030/games/1 ^
   -H "Content-Type: application/json" ^
   -d "{\"move\":{\"from\":\"e2\",\"to\":\"e4\"}}"
+```
+
+Play a human move but defer computer response (used by UI for delayed AI):
+
+```bash
+curl -X PATCH http://localhost:3030/games/1 ^
+  -H "Content-Type: application/json" ^
+  -d "{\"move\":{\"from\":\"e2\",\"to\":\"e4\"},\"deferComputer\":true}"
+```
+
+Trigger computer move:
+
+```bash
+curl -X PATCH http://localhost:3030/games/1 ^
+  -H "Content-Type: application/json" ^
+  -d "{\"computerMove\":true}"
 ```
 
 Undo last move:

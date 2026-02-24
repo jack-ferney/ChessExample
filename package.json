@@ -1,0 +1,17 @@
+{
+  "name": "feathers-chess-rest-app",
+  "version": "1.0.0",
+  "description": "Simple chess web app using Feathers REST services.",
+  "main": "src/index.js",
+  "type": "commonjs",
+  "scripts": {
+    "start": "node src/index.js",
+    "dev": "node src/index.js"
+  },
+  "dependencies": {
+    "@feathersjs/errors": "^5.0.0",
+    "@feathersjs/express": "^5.0.0",
+    "@feathersjs/feathers": "^5.0.0",
+    "chess.js": "^1.0.0"
+  }
+}

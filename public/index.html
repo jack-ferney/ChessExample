@@ -1,0 +1,133 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Feathers Chess</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <div class="ambient ambient-a"></div>
+    <div class="ambient ambient-b"></div>
+
+    <main class="shell">
+      <header class="hero">
+        <div>
+          <h1>Feathers Chess</h1>
+          <p class="subtitle">Modern chess UI backed by persistent Feathers REST services.</p>
+        </div>
+
+        <div class="hero-actions">
+          <button id="new-game" class="btn btn-primary" type="button">New Game</button>
+          <button id="refresh-games" class="btn btn-soft" type="button">Refresh List</button>
+        </div>
+      </header>
+
+      <p id="status" class="status">Loading games...</p>
+
+      <section class="workspace">
+        <aside class="card games-panel">
+          <div class="panel-header">
+            <h2>Saved Games</h2>
+            <span id="games-count" class="chip">0</span>
+          </div>
+          <p class="panel-note">Games are stored on disk and survive server restarts.</p>
+          <div id="games-list" class="games-list"></div>
+        </aside>
+
+        <section class="board-panel">
+          <div class="card board-card">
+            <div class="board-head">
+              <div class="meta">
+                <span class="label">Game</span>
+                <code id="game-id">none</code>
+              </div>
+              <div id="turn-chip" class="chip">No game</div>
+            </div>
+            <div id="board" class="board" aria-label="Chess board"></div>
+          </div>
+
+          <div class="card controls-card">
+            <h2>Game Setup</h2>
+            <div class="move-grid setup-grid">
+              <label>
+                Opponent
+                <select id="mode-select">
+                  <option value="human">Human (local)</option>
+                  <option value="computer" selected>Computer</option>
+                </select>
+              </label>
+              <label>
+                Difficulty
+                <select id="difficulty-select">
+                  <option value="easy">Easy</option>
+                  <option value="medium" selected>Medium</option>
+                  <option value="hard">Hard</option>
+                </select>
+              </label>
+              <label>
+                Play As
+                <select id="color-select">
+                  <option value="w" selected>White</option>
+                  <option value="b">Black</option>
+                </select>
+              </label>
+            </div>
+
+            <h2>Play Move</h2>
+            <div class="move-grid">
+              <label>
+                From
+                <input id="from" maxlength="2" placeholder="e2" />
+              </label>
+              <label>
+                To
+                <input id="to" maxlength="2" placeholder="e4" />
+              </label>
+              <label>
+                Promotion
+                <input id="promotion" maxlength="1" placeholder="q" />
+              </label>
+            </div>
+
+            <div class="action-row">
+              <button id="make-move" class="btn btn-primary" type="button">Make Move</button>
+              <button id="undo-move" class="btn btn-soft" type="button">Undo</button>
+              <button id="reset-game" class="btn btn-soft" type="button">Reset</button>
+            </div>
+          </div>
+        </section>
+
+        <aside class="card history-panel">
+          <h2>Move Timeline</h2>
+          <ol id="history" class="history-list"></ol>
+        </aside>
+      </section>
+
+      <details class="api-details">
+        <summary>REST API examples</summary>
+        <pre>
+POST   /games
+GET    /games
+GET    /games?summary=true
+GET    /games/:id
+PATCH  /games/:id
+
+Move payload:
+{ "move": { "from": "e2", "to": "e4" } }
+
+Undo payload:
+{ "undo": true }
+
+Difficulty payload:
+{ "setDifficulty": "hard" }
+
+Reset payload:
+{ "reset": true }
+        </pre>
+      </details>
+    </main>
+
+    <script src="./app.js"></script>
+  </body>
+</html>

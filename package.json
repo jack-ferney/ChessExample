@@ -2,16 +2,25 @@
   "name": "feathers-chess-rest-app",
   "version": "1.0.0",
   "description": "Simple chess web app using Feathers REST services.",
-  "main": "src/index.js",
+  "main": "dist/index.js",
   "type": "commonjs",
   "scripts": {
-    "start": "node src/index.js",
-    "dev": "node src/index.js"
+    "build:server": "tsc -p tsconfig.server.json",
+    "build:client": "tsc -p tsconfig.client.json",
+    "build": "npm run build:client && npm run build:server",
+    "start": "npm run build && node dist/index.js",
+    "dev": "npm run build:client && tsx src/index.ts",
+    "typecheck": "tsc -p tsconfig.server.json --noEmit && tsc -p tsconfig.client.json --noEmit"
   },
   "dependencies": {
     "@feathersjs/errors": "^5.0.0",
     "@feathersjs/express": "^5.0.0",
     "@feathersjs/feathers": "^5.0.0",
     "chess.js": "^1.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^24.3.0",
+    "tsx": "^4.20.5",
+    "typescript": "^5.9.2"
   }
 }

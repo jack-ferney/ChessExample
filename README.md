@@ -2,6 +2,11 @@
 
 A modern chess web app built with Feathers v5 and a REST API.
 
+Source code is written in TypeScript:
+
+- Server: `src/**/*.ts` -> compiled to `dist/`
+- Browser app: `public/app.ts` -> compiled to `public/app.js`
+
 ## What it includes
 
 - Feathers service at `/games`
@@ -18,6 +23,8 @@ A modern chess web app built with Feathers v5 and a REST API.
 - Drag-and-drop piece movement (with click-based fallback)
 - Click a piece to preview legal destination squares, then click a target square to move
 - Computer moves are delayed by ~1 second and animated
+- Theme switcher with 5 themes (`aurora`, `synthwave`, `abyss`, `ember`, `blueprint`)
+- Piece style switcher with 5 icon sets (`classic`, `glass`, `mono`, `cyber`, `emoji`)
 - Undo support and older-game review from the UI
 
 ## Run

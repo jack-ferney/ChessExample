@@ -10,6 +10,7 @@ Source code is written in TypeScript:
 ## What it includes
 
 - Feathers service at `/games`
+- Feathers service hooks for request timing and payload/query normalization (`src/services/games.hooks.ts`)
 - Persistent game storage in `data/games.json` (survives server restarts)
 - REST methods:
   - `POST /games` create a game
@@ -20,6 +21,7 @@ Source code is written in TypeScript:
 - Static web UI in `public/` that calls the REST API
 - Legal move validation via `chess.js`
 - Computer opponent with 3 difficulties (`easy`, `medium`, `hard`)
+- Engine uses iterative deepening + alpha-beta + quiescence + positional heuristics
 - Drag-and-drop piece movement (with click-based fallback)
 - Click a piece to preview legal destination squares, then click a target square to move
 - Computer moves are delayed by ~1 second and animated

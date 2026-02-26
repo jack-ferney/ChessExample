@@ -3,6 +3,7 @@ const path = require('path')
 const { feathers } = require('@feathersjs/feathers')
 const express = require('@feathersjs/express')
 const { GamesService } = require('./services/games.service')
+const { gamesHooks } = require('./services/games.hooks')
 
 const app = express(feathers())
 const gamesDataPath = process.env.GAMES_DATA_PATH || path.join(__dirname, '..', 'data', 'games.json')
@@ -16,6 +17,7 @@ app.use('/', express.static(path.join(__dirname, '..', 'public')))
 app.use('/games', new GamesService({ dataPath: gamesDataPath }), {
   methods: ['find', 'get', 'create', 'patch']
 })
+app.service('games').hooks(gamesHooks)
 
 app.use(express.errorHandler())
 

@@ -14,6 +14,74 @@ const PIECE_VALUES = {
   q: 900,
   k: 0
 }
+const PIECE_SQUARE_TABLES = {
+  p: [
+    0, 0, 0, 0, 0, 0, 0, 0,
+    5, 10, 10, -20, -20, 10, 10, 5,
+    5, -5, -10, 0, 0, -10, -5, 5,
+    0, 0, 0, 20, 20, 0, 0, 0,
+    5, 5, 10, 25, 25, 10, 5, 5,
+    10, 10, 20, 30, 30, 20, 10, 10,
+    50, 50, 50, 50, 50, 50, 50, 50,
+    0, 0, 0, 0, 0, 0, 0, 0
+  ],
+  n: [
+    -50, -40, -30, -30, -30, -30, -40, -50,
+    -40, -20, 0, 0, 0, 0, -20, -40,
+    -30, 0, 10, 15, 15, 10, 0, -30,
+    -30, 5, 15, 20, 20, 15, 5, -30,
+    -30, 0, 15, 20, 20, 15, 0, -30,
+    -30, 5, 10, 15, 15, 10, 5, -30,
+    -40, -20, 0, 5, 5, 0, -20, -40,
+    -50, -40, -30, -30, -30, -30, -40, -50
+  ],
+  b: [
+    -20, -10, -10, -10, -10, -10, -10, -20,
+    -10, 5, 0, 0, 0, 0, 5, -10,
+    -10, 10, 10, 10, 10, 10, 10, -10,
+    -10, 0, 10, 10, 10, 10, 0, -10,
+    -10, 5, 5, 10, 10, 5, 5, -10,
+    -10, 0, 5, 10, 10, 5, 0, -10,
+    -10, 0, 0, 0, 0, 0, 0, -10,
+    -20, -10, -10, -10, -10, -10, -10, -20
+  ],
+  r: [
+    0, 0, 0, 5, 5, 0, 0, 0,
+    -5, 0, 0, 0, 0, 0, 0, -5,
+    -5, 0, 0, 0, 0, 0, 0, -5,
+    -5, 0, 0, 0, 0, 0, 0, -5,
+    -5, 0, 0, 0, 0, 0, 0, -5,
+    -5, 0, 0, 0, 0, 0, 0, -5,
+    5, 10, 10, 10, 10, 10, 10, 5,
+    0, 0, 0, 0, 0, 0, 0, 0
+  ],
+  q: [
+    -20, -10, -10, -5, -5, -10, -10, -20,
+    -10, 0, 0, 0, 0, 0, 0, -10,
+    -10, 0, 5, 5, 5, 5, 0, -10,
+    -5, 0, 5, 5, 5, 5, 0, -5,
+    0, 0, 5, 5, 5, 5, 0, -5,
+    -10, 5, 5, 5, 5, 5, 0, -10,
+    -10, 0, 5, 0, 0, 0, 0, -10,
+    -20, -10, -10, -5, -5, -10, -10, -20
+  ],
+  k: [
+    -30, -40, -40, -50, -50, -40, -40, -30,
+    -30, -40, -40, -50, -50, -40, -40, -30,
+    -30, -40, -40, -50, -50, -40, -40, -30,
+    -30, -40, -40, -50, -50, -40, -40, -30,
+    -20, -30, -30, -40, -40, -30, -30, -20,
+    -10, -20, -20, -20, -20, -20, -20, -10,
+    20, 20, 0, 0, 0, 0, 20, 20,
+    20, 30, 10, 0, 0, 10, 30, 20
+  ]
+}
+const CENTER_SQUARES = new Set(['d4', 'e4', 'd5', 'e5'])
+const BISHOP_PAIR_BONUS = 30
+const DOUBLED_PAWN_PENALTY = 14
+const ISOLATED_PAWN_PENALTY = 12
+const PASSED_PAWN_BONUS_BY_ADVANCEMENT = [0, 6, 12, 20, 34, 52, 0, 0]
+const QUIESCENCE_CAPTURE_DEPTH = 4
 
 function isTruthy(value) {
   return value === true || value === 'true' || value === 1 || value === '1'
@@ -78,6 +146,15 @@ class GamesService {
     this.loadFromDisk()
   }
 
+  async setup(app, path) {
+    this.app = app
+    this.path = path
+  }
+
+  async teardown() {
+    this.saveToDisk()
+  }
+
   getEngineColor(game) {
     if (game.mode !== 'computer') {
       return null
@@ -127,6 +204,117 @@ class GamesService {
     return byFrom
   }
 
+  getPieceSquareValue(pieceType, row, col, color) {
+    const table = PIECE_SQUARE_TABLES[pieceType]
+    if (!table) {
+      return 0
+    }
+
+    const index = row * 8 + col
+    if (color === 'w') {
+      return table[index]
+    }
+
+    const mirroredIndex = (7 - row) * 8 + col
+    return table[mirroredIndex]
+  }
+
+  getMoveOrderingScore(move) {
+    let score = 0
+
+    if (move.promotion) {
+      score += 800 + (PIECE_VALUES[move.promotion] || 0)
+    }
+
+    if (move.captured) {
+      const capturedValue = PIECE_VALUES[move.captured] || 0
+      const attackerValue = PIECE_VALUES[move.piece] || 0
+      score += capturedValue * 10 - attackerValue
+    }
+
+    if (move.flags && (move.flags.includes('k') || move.flags.includes('q'))) {
+      score += 45
+    }
+
+    if (move.san && move.san.includes('#')) {
+      score += 200000
+    } else if (move.san && move.san.includes('+')) {
+      score += 70
+    }
+
+    if (CENTER_SQUARES.has(move.to)) {
+      score += 12
+    }
+
+    return score
+  }
+
+  orderMoves(moves = []) {
+    return moves
+      .slice()
+      .sort((a, b) => this.getMoveOrderingScore(b) - this.getMoveOrderingScore(a))
+  }
+
+  evaluatePawnStructure(board) {
+    const pawns = {
+      w: Array.from({ length: 8 }, () => []),
+      b: Array.from({ length: 8 }, () => [])
+    }
+
+    for (let row = 0; row < 8; row += 1) {
+      for (let col = 0; col < 8; col += 1) {
+        const piece = board[row][col]
+        if (piece && piece.type === 'p') {
+          pawns[piece.color][col].push(row)
+        }
+      }
+    }
+
+    let whiteScore = 0
+
+    for (const color of ['w', 'b']) {
+      const enemyColor = color === 'w' ? 'b' : 'w'
+      const sign = color === 'w' ? 1 : -1
+
+      for (let file = 0; file < 8; file += 1) {
+        const filePawns = pawns[color][file]
+        if (filePawns.length > 1) {
+          whiteScore += sign * -DOUBLED_PAWN_PENALTY * (filePawns.length - 1)
+        }
+
+        for (const row of filePawns) {
+          const hasLeftSupport = file > 0 && pawns[color][file - 1].length > 0
+          const hasRightSupport = file < 7 && pawns[color][file + 1].length > 0
+          if (!hasLeftSupport && !hasRightSupport) {
+            whiteScore += sign * -ISOLATED_PAWN_PENALTY
+          }
+
+          let blockedByEnemyPawn = false
+          for (let scanFile = Math.max(0, file - 1); scanFile <= Math.min(7, file + 1); scanFile += 1) {
+            for (const enemyRow of pawns[enemyColor][scanFile]) {
+              if ((color === 'w' && enemyRow < row) || (color === 'b' && enemyRow > row)) {
+                blockedByEnemyPawn = true
+                break
+              }
+            }
+
+            if (blockedByEnemyPawn) {
+              break
+            }
+          }
+
+          if (!blockedByEnemyPawn) {
+            const advancement = color === 'w' ? 6 - row : row - 1
+            const index = Math.max(0, Math.min(PASSED_PAWN_BONUS_BY_ADVANCEMENT.length - 1, advancement))
+            whiteScore += sign * PASSED_PAWN_BONUS_BY_ADVANCEMENT[index]
+          }
+        }
+      }
+    }
+
+    return whiteScore
+  }
+
   evaluatePosition(chess) {
     if (chess.isCheckmate()) {
       return chess.turn() === 'w' ? -100000 : 100000
@@ -138,17 +326,47 @@ class GamesService {
 
     let score = 0
     const board = chess.board()
+    const bishopCount = { w: 0, b: 0 }
 
-    for (const row of board) {
-      for (const square of row) {
+    for (let row = 0; row < 8; row += 1) {
+      for (let col = 0; col < 8; col += 1) {
+        const square = board[row][col]
         if (!square) {
           continue
         }
 
-        const value = PIECE_VALUES[square.type] || 0
+        let value = PIECE_VALUES[square.type] || 0
+        value += this.getPieceSquareValue(square.type, row, col, square.color)
+
+        if (square.type === 'b') {
+          bishopCount[square.color] += 1
+        }
+
+        const centerDistance = Math.abs(3.5 - row) + Math.abs(3.5 - col)
+        const centerBonus = Math.max(0, Math.round((3.5 - centerDistance) * 4))
+
+        if (square.type === 'n' || square.type === 'b') {
+          value += centerBonus
+        }
+
+        if (square.type === 'p' && row >= 2 && row <= 5 && col >= 2 && col <= 5) {
+          value += 6
+        }
+
         score += square.color === 'w' ? value : -value
       }
     }
+
+    if (bishopCount.w >= 2) {
+      score += BISHOP_PAIR_BONUS
+    }
+
+    if (bishopCount.b >= 2) {
+      score -= BISHOP_PAIR_BONUS
+    }
+
+    score += this.evaluatePawnStructure(board)
+    score += chess.turn() === 'w' ? 8 : -8
 
     return score
   }
@@ -159,20 +377,127 @@ class GamesService {
     return color === 'w' ? whiteScore : -whiteScore
   }
 
-  minimax(chess, depth, alpha, beta, engineColor) {
-    if (depth === 0 || chess.isGameOver()) {
+  isSearchTimedOut(searchState) {
+    if (!searchState) {
+      return false
+    }
+
+    searchState.nodeCount += 1
+
+    if (!searchState.timedOut && searchState.nodeCount % 1024 === 0 && Date.now() >= searchState.deadline) {
+      searchState.timedOut = true
+    }
+
+    return searchState.timedOut
+  }
+
+  quiescence(chess, alpha, beta, engineColor, searchState, depthLeft = QUIESCENCE_CAPTURE_DEPTH) {
+    if (depthLeft <= 0 || chess.isGameOver() || this.isSearchTimedOut(searchState)) {
       return this.evaluateForColor(chess, engineColor)
     }
 
-    const moves = chess.moves({ verbose: true })
+    const maximizing = chess.turn() === engineColor
+    const standPat = this.evaluateForColor(chess, engineColor)
+
+    if (maximizing) {
+      if (standPat >= beta) {
+        return standPat
+      }
+      if (standPat > alpha) {
+        alpha = standPat
+      }
+    } else {
+      if (standPat <= alpha) {
+        return standPat
+      }
+      if (standPat < beta) {
+        beta = standPat
+      }
+    }
+
+    const tacticalMoves = this.orderMoves(
+      chess.moves({ verbose: true }).filter((move) => {
+        return Boolean(move.captured || move.promotion || (typeof move.san === 'string' && move.san.includes('+')))
+      })
+    )
+
+    if (tacticalMoves.length === 0) {
+      return standPat
+    }
+
+    if (maximizing) {
+      let best = standPat
+
+      for (const move of tacticalMoves) {
+        if (this.isSearchTimedOut(searchState)) {
+          break
+        }
+        chess.move(move)
+        const score = this.quiescence(chess, alpha, beta, engineColor, searchState, depthLeft - 1)
+        chess.undo()
+
+        if (score > best) {
+          best = score
+        }
+
+        alpha = Math.max(alpha, best)
+        if (beta <= alpha) {
+          break
+        }
+      }
+
+      return best
+    }
+
+    let best = standPat
+
+    for (const move of tacticalMoves) {
+      if (this.isSearchTimedOut(searchState)) {
+        break
+      }
+      chess.move(move)
+      const score = this.quiescence(chess, alpha, beta, engineColor, searchState, depthLeft - 1)
+      chess.undo()
+
+      if (score < best) {
+        best = score
+      }
+
+      beta = Math.min(beta, best)
+      if (beta <= alpha) {
+        break
+      }
+    }
+
+    return best
+  }
+
+  minimax(chess, depth, alpha, beta, engineColor, searchState) {
+    if (chess.isGameOver()) {
+      return this.evaluateForColor(chess, engineColor)
+    }
+
+    if (depth <= 0) {
+      return this.quiescence(chess, alpha, beta, engineColor, searchState, searchState?.quiescenceDepth)
+    }
+
+    if (this.isSearchTimedOut(searchState)) {
+      return this.evaluateForColor(chess, engineColor)
+    }
+
+    const moves = this.orderMoves(chess.moves({ verbose: true }))
     const maximizing = chess.turn() === engineColor
 
     if (maximizing) {
       let best = -Infinity
 
       for (const move of moves) {
+        if (this.isSearchTimedOut(searchState)) {
+          break
+        }
+
         chess.move(move)
-        const score = this.minimax(chess, depth - 1, alpha, beta, engineColor)
+        const score = this.minimax(chess, depth - 1, alpha, beta, engineColor, searchState)
         chess.undo()
 
         if (score > best) {
@@ -191,8 +516,12 @@ class GamesService {
     let best = Infinity
 
     for (const move of moves) {
+      if (this.isSearchTimedOut(searchState)) {
+        break
+      }
+
       chess.move(move)
-      const score = this.minimax(chess, depth - 1, alpha, beta, engineColor)
+      const score = this.minimax(chess, depth - 1, alpha, beta, engineColor, searchState)
       chess.undo()
 
       if (score < best) {
@@ -211,12 +540,12 @@ class GamesService {
   getDifficultyConfig(difficulty) {
     switch (difficulty) {
       case 'easy':
-        return { depth: 1, randomTop: 4, noise: 120, blunderChance: 0.35 }
+        return { maxDepth: 2, randomTop: 4, noise: 48, blunderChance: 0.16, timeMs: 180, quiescenceDepth: 2 }
       case 'hard':
-        return { depth: 3, randomTop: 1, noise: 0, blunderChance: 0 }
+        return { maxDepth: 5, randomTop: 1, noise: 0, blunderChance: 0, timeMs: 1300, quiescenceDepth: 4 }
       case 'medium':
       default:
-        return { depth: 2, randomTop: 2, noise: 24, blunderChance: 0.1 }
+        return { maxDepth: 3, randomTop: 2, noise: 12, blunderChance: 0.05, timeMs: 550, quiescenceDepth: 3 }
     }
   }
 
@@ -228,19 +557,47 @@ class GamesService {
     }
 
     const config = this.getDifficultyConfig(difficulty)
-    const scoredMoves = []
+    const searchState = {
+      deadline: Date.now() + config.timeMs,
+      nodeCount: 0,
+      timedOut: false,
+      quiescenceDepth: config.quiescenceDepth || QUIESCENCE_CAPTURE_DEPTH
+    }
 
-    for (const move of legalMoves) {
-      chess.move(move)
-      const baseScore = this.minimax(chess, config.depth - 1, -Infinity, Infinity, engineColor)
-      chess.undo()
+    let orderedRootMoves = this.orderMoves(legalMoves)
+    let scoredMoves = []
 
-      const noisyScore = baseScore + (Math.random() * 2 - 1) * config.noise
-      scoredMoves.push({
-        move,
-        baseScore,
-        noisyScore
-      })
+    for (let depth = 1; depth <= config.maxDepth; depth += 1) {
+      const depthScores = []
+
+      for (const move of orderedRootMoves) {
+        if (this.isSearchTimedOut(searchState)) {
+          break
+        }
+
+        chess.move(move)
+        const baseScore = this.minimax(chess, depth - 1, -Infinity, Infinity, engineColor, searchState)
+        chess.undo()
+        depthScores.push({ move, baseScore })
+      }
+
+      if (depthScores.length > 0) {
+        depthScores.sort((a, b) => b.baseScore - a.baseScore)
+        scoredMoves = depthScores
+        orderedRootMoves = depthScores.map((entry) => entry.move)
+      }
+
+      if (searchState.timedOut) {
+        break
+      }
+    }
+
+    if (scoredMoves.length === 0) {
+      scoredMoves = orderedRootMoves.map((move) => ({ move, baseScore: 0 }))
+    }
+
+    for (const entry of scoredMoves) {
+      entry.noisyScore = entry.baseScore + (Math.random() * 2 - 1) * config.noise
     }
 
     scoredMoves.sort((a, b) => b.noisyScore - a.noisyScore)
@@ -482,11 +839,11 @@ class GamesService {
     return games.map((game) => this.toResult(game))
   }
 
-  async get(id) {
+  async get(id, _params = {}) {
     return this.toResult(this.getGameOrThrow(id))
   }
 
-  async create(data = {}) {
+  async create(data = {}, _params = {}) {
     if (typeof data !== 'object' || data === null || Array.isArray(data)) {
       throw new BadRequest('Create payload must be an object.')
     }
@@ -541,7 +898,7 @@ class GamesService {
     return result
   }
 
-  async patch(id, data = {}) {
+  async patch(id, data = {}, _params = {}) {
     const game = this.getGameOrThrow(id)
 
     if (typeof data !== 'object' || data === null || Array.isArray(data)) {
@@ -557,6 +914,12 @@ class GamesService {
 
       game.difficulty = normalized
       game.updatedAt = new Date().toISOString()
+    }
+
+    const hasActionRequest = data.reset === true || data.computerMove === true || data.undo === true || Boolean(data.move)
+    if (difficultyUpdate !== undefined && !hasActionRequest) {
+      this.saveToDisk()
+      return this.toResult(game)
     }
 
     if (data.reset === true) {
